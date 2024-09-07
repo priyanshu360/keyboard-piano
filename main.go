@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"github.com/ebitengine/oto/v3"
 	"github.com/hajimehoshi/go-mp3"
-	"golang.org/x/term"
+	"net"
 	"os"
-	"syscall"
 	"time"
 )
 
@@ -60,14 +58,6 @@ func play(otoCtx *oto.Context, fileBytes []byte) error {
 		time.Sleep(time.Millisecond)
 	}
 
-	// Now that the sound finished playing, we can restart from the beginning (or go to any location in the sound) using seek
-	// newPos, err := player.(io.Seeker).Seek(0, io.SeekStart)
-	// if err != nil{
-	//     panic("player.Seek failed: " + err.Error())
-	// }
-	// println("Player is now at position:", newPos)
-	// player.Play()
-
 	// If you don't want the player/sound anymore simply close
 	err = player.Close()
 	if err != nil {
@@ -76,32 +66,66 @@ func play(otoCtx *oto.Context, fileBytes []byte) error {
 	return nil
 }
 
-func main() {
-	// Get the current terminal state
-	oldState, err := term.MakeRaw(int(syscall.Stdin))
-	if err != nil {
-		fmt.Println("Error entering raw mode:", err)
-		return
-	}
-	defer term.Restore(int(syscall.Stdin), oldState) // Restore the terminal when done
-
-	otoCtx := createContext()
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Split(bufio.ScanBytes)
-	km := initNotes()
-	for scanner.Scan() {
-		r := scanner.Text()
-		// fmt.Printf("%s", r)
-		switch r {
-		case "x":
-			os.Exit(1)
-		default:
-			if b, ok := km[r]; ok {
-				go play(otoCtx, b)
+func readTCP(conn net.Conn) {
+	player := NewPlayer()
+	for {
+		b := make([]byte, 100)
+		size, err := conn.Read(b)
+		if err != nil {
+			panic(err)
+		}
+		if size != 0 {
+			for _, each := range string(b[0:size]) {
+				fmt.Print(string(each))
+				go player.Play(string(each))
 			}
 		}
 	}
+}
 
+func makeTCP() {
+	listner, err := net.Listen("tcp", ":1234")
+	if err != nil {
+		panic(err)
+	}
+	for {
+		conn, err := listner.Accept()
+		if err != nil {
+			panic(err)
+		}
+		readTCP(conn)
+	}
+}
+
+type Player interface {
+	Play()
+}
+
+type player struct {
+	otoCtx *oto.Context
+	km     notes
+}
+
+func NewPlayer() *player {
+	return &player{
+		otoCtx: createContext(),
+		km:     initNotes(),
+	}
+}
+
+func (p *player) Play(key string) {
+	switch key {
+	case "x":
+		os.Exit(1)
+	default:
+		if b, ok := p.km[key]; ok {
+			play(p.otoCtx, b)
+		}
+	}
+}
+
+func main() {
+	makeTCP()
 }
 
 type notes map[string][]byte
